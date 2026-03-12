@@ -5,22 +5,15 @@ from app.schemas.router_schema import SupervisorRouter
 
 
 def supervisor_node(state):
-
     user_query = state["messages"][0].content
-
-    # Extract cities if not already extracted
     if not state.get("origin") or not state.get("destination"):
-
         extractor = llm_worker.with_structured_output(TripInfo)
-
         trip = extractor.invoke([
             SystemMessage(content="Extract origin and destination cities."),
             HumanMessage(content=user_query)
         ])
-
         state["origin"] = trip.origin
         state["destination"] = trip.destination
-
     prompt = f"""
 You are a travel supervisor responsible for coordinating multiple travel planning agents.
 
@@ -51,13 +44,10 @@ Rules:
 """
 
     router = llm_supervisor.with_structured_output(SupervisorRouter)
-
     decision = router.invoke(
         [SystemMessage(content=prompt)] + state["messages"]
     )
-
     print(f"Supervisor → {decision.next_step}")
-
     return {
         "next_node": decision.next_step,
         "origin": state["origin"],
