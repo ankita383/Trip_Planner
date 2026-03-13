@@ -23,7 +23,8 @@ def call_flights(state):
                 name="FlightAgent"
             )
         ],
-        "flights_done": True
+        "flights_done": True,
+        "last_agent": "Flights"
     }
 
 
@@ -44,7 +45,8 @@ def call_hotels(state):
                 name="HotelAgent"
             )
         ],
-        "hotels_done": True
+        "hotels_done": True,
+        "last_agent": "Hotels"
     }
 
 
@@ -65,7 +67,8 @@ def call_activities(state):
                 name="ActivityAgent"
             )
         ],
-        "activities_done": True
+        "activities_done": True,
+        "last_agent": "Activities"
     }
 
 
@@ -83,5 +86,65 @@ def call_budget(state):
                 name="BudgetAnalyst"
             )
         ],
-        "budget_done": True
+        "budget_done": True,
+        "last_agent": "BudgetAnalyst"
+    }
+
+def human_review(state):
+
+    last_message = state["messages"][-1]
+    agent_name = last_message.name if hasattr(last_message, 'name') else None
+
+    if agent_name == "FlightAgent":
+        agent = "Flights"
+    elif agent_name == "HotelAgent":
+        agent = "Hotels"
+    elif agent_name == "ActivityAgent":
+        agent = "Activities"
+    elif agent_name == "BudgetAnalyst":
+        agent = "BudgetAnalyst"
+    else:
+        agent = "Flights"
+
+    print("\n---------------------------")
+    print(f"HUMAN REVIEW AFTER {agent}")
+    print("---------------------------\n")
+
+    info = state["messages"][-1].content
+    print(info)
+
+    decision = input("\nApprove this result? (yes/no): ").strip().lower()
+
+    if decision == "yes":
+
+        print(f"{agent} approved.\n")
+
+        next_node = "Supervisor"
+        approved = True
+        reset_flags = {}
+
+    else:
+
+        if agent == "BudgetAnalyst":
+            print("Budget rejected, restarting planning process from Flights...\n")
+            next_node = "Supervisor"
+            approved = False
+            # Reset all done flags to start over from Flights
+            reset_flags = {
+                "flights_done": False,
+                "hotels_done": False,
+                "activities_done": False,
+                "budget_done": False
+            }
+        else:
+            print(f"{agent} will run again...\n")
+            next_node = agent
+            approved = False
+            reset_flags = {}
+
+    return {
+        "approved": approved,
+        "last_agent": agent,
+        "next_node": next_node,
+        **reset_flags
     }
