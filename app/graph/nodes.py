@@ -8,10 +8,15 @@ from app.agents.budget_agent import budget_agent
 def call_flights(state):
     origin = state["origin"]
     destination = state["destination"]
+    query = f"Find flights from {origin} to {destination}"
+
+    if state.get("feedback"):
+        query += f"\nUser feedback: {state['feedback']}"
+
     response = flight_agent.invoke({
         "messages": [
             HumanMessage(
-                content=f"Find flights from {origin} to {destination}"
+                content=query
             )
         ]
     })
@@ -24,16 +29,22 @@ def call_flights(state):
             )
         ],
         "flights_done": True,
-        "last_agent": "Flights"
+        "last_agent": "Flights",
+        "feedback": None
     }
 
 
 def call_hotels(state):
     destination = state["destination"]
+    query = f"Find hotels in {destination}"
+
+    if state.get("feedback"):
+        query += f"\nUser feedback: {state['feedback']}"
+
     response = hotel_agent.invoke({
         "messages": [
             HumanMessage(
-                content=f"Find hotels in {destination}"
+                content=query
             )
         ]
     })
@@ -46,16 +57,22 @@ def call_hotels(state):
             )
         ],
         "hotels_done": True,
-        "last_agent": "Hotels"
+        "last_agent": "Hotels",
+        "feedback": None
     }
 
 
 def call_activities(state):
     destination = state["destination"]
+    query = f"Find tourist activities in {destination}"
+
+    if state.get("feedback"):
+        query += f"\nUser feedback: {state['feedback']}"
+
     response = activity_agent.invoke({
         "messages": [
             HumanMessage(
-                content=f"Find tourist activities in {destination}"
+                content=query
             )
         ]
     })
@@ -68,14 +85,22 @@ def call_activities(state):
             )
         ],
         "activities_done": True,
-        "last_agent": "Activities"
+        "last_agent": "Activities",
+        "feedback": None
     }
 
 
 def call_budget(state):
+    review_message = HumanMessage(content="Calculate total travel cost.")
+
+    if state.get("feedback"):
+        review_message = HumanMessage(
+            content=f"Calculate total travel cost.\nUser feedback: {state['feedback']}"
+        )
+
     response = budget_agent.invoke({
         "messages": state["messages"][-3:] + [
-            HumanMessage(content="Calculate total travel cost.")
+            review_message
         ]
     })
     content = response["messages"][-1].content
@@ -87,7 +112,8 @@ def call_budget(state):
             )
         ],
         "budget_done": True,
-        "last_agent": "BudgetAnalyst"
+        "last_agent": "BudgetAnalyst",
+        "feedback": None
     }
 
 def human_review(state):
@@ -119,32 +145,19 @@ def human_review(state):
 
         print(f"{agent} approved.\n")
 
-        next_node = "Supervisor"
-        approved = True
-        reset_flags = {}
+        return {
+            "approved": True,
+            "feedback": None,
+            "last_agent": agent,
+            "next_node": "Supervisor"
+        }
 
-    else:
-
-        if agent == "BudgetAnalyst":
-            print("Budget rejected, restarting planning process from Flights...\n")
-            next_node = "Supervisor"
-            approved = False
-            # Reset all done flags to start over from Flights
-            reset_flags = {
-                "flights_done": False,
-                "hotels_done": False,
-                "activities_done": False,
-                "budget_done": False
-            }
-        else:
-            print(f"{agent} will run again...\n")
-            next_node = agent
-            approved = False
-            reset_flags = {}
+    feedback = input("Enter feedback: ").strip()
+    print(f"{agent} will run again with your feedback...\n")
 
     return {
-        "approved": approved,
+        "approved": False,
+        "feedback": feedback,
         "last_agent": agent,
-        "next_node": next_node,
-        **reset_flags
+        "next_node": agent
     }

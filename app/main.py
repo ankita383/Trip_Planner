@@ -23,7 +23,8 @@ async def generate_plan(request: TripQuery):
         "activities_done": False,
         "budget_done": False,
         "last_agent": "",
-        "approved": False
+        "approved": False,
+        "feedback": None
     })
 
     history = []

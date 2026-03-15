@@ -32,7 +32,6 @@ builder.add_conditional_edges(
     }
 )
 
-# ALL agents go to HumanReview
 builder.add_edge("Flights", "HumanReview")
 builder.add_edge("Hotels", "HumanReview")
 builder.add_edge("Activities", "HumanReview")
@@ -40,7 +39,7 @@ builder.add_edge("BudgetAnalyst", "HumanReview")
 
 builder.add_conditional_edges(
     "HumanReview",
-    lambda x: x.get("next_node"),
+    lambda x: "Supervisor" if x.get("approved") else x.get("last_agent"),
     {
         "Supervisor": "Supervisor",
         "Flights": "Flights",

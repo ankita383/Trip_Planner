@@ -14,26 +14,17 @@ def supervisor_node(state):
         ])
         state["origin"] = trip.origin
         state["destination"] = trip.destination
-<<<<<<< HEAD
-
-    # Check if all tasks are done
-    if state.get("flights_done", False) and state.get("hotels_done", False) and state.get("activities_done", False) and state.get("budget_done", False):
-        decision = type('Decision', (), {'next_step': 'FINISH'})()
-    else:
-        prompt = f"""
-=======
     prompt = f"""
->>>>>>> c1316848e5c722600af77cbc022a4ef2a5b2351a
 You are a travel supervisor responsible for coordinating multiple travel planning agents.
 
 User query: {user_query}
 
 Available agents:
 
-Flights → finds flight options between two cities  
-Hotels → finds hotels in a city  
-Activities → finds tourist attractions  
-BudgetAnalyst → calculates total trip cost  
+Flights -> finds flight options between two cities  
+Hotels -> finds hotels in a city  
+Activities -> finds tourist attractions  
+BudgetAnalyst -> calculates total trip cost  
 
 Current trip context:
 
@@ -58,18 +49,11 @@ Rules:
 • If nothing is requested or all relevant tasks are done, return FINISH
 • Do not repeat agents that are already done
 """
-<<<<<<< HEAD
-        router = llm_supervisor.with_structured_output(SupervisorRouter)
-        decision = router.invoke(
-            [SystemMessage(content=prompt)] + state["messages"]
-        )
-=======
 
     router = llm_supervisor.with_structured_output(SupervisorRouter)
     decision = router.invoke(
         [SystemMessage(content=prompt)] + state["messages"]
     )
->>>>>>> c1316848e5c722600af77cbc022a4ef2a5b2351a
     print(f"Supervisor → {decision.next_step}")
     return {
         "next_node": decision.next_step,
