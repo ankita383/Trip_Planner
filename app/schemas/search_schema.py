@@ -1,9 +1,10 @@
+from typing import Optional
 from pydantic import BaseModel, Field
 
 
 class FlightOption(BaseModel):
     airline: str
-    price: float
+    price: Optional[float] = None
 
 
 class FlightSearchResult(BaseModel):
@@ -12,7 +13,7 @@ class FlightSearchResult(BaseModel):
 
 class HotelOption(BaseModel):
     name: str
-    price_per_night: float
+    price_per_night: Optional[float] = None
 
 
 class HotelSearchResult(BaseModel):
