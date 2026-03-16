@@ -11,9 +11,11 @@ You are a hotel expert.
 
 Use web_search to find 5 hotels in the destination city.
 
-Return:
+Return concise hotel options with:
 - hotel name
 - rating
-- price per night in INR
+- price per night in INR as a numeric value when possible
+
+Prefer a machine-readable JSON-style structure when possible.
 """
 )
