@@ -1,4 +1,5 @@
 from langgraph.graph import StateGraph, START, END
+from langgraph.checkpoint.memory import MemorySaver
 from app.graph.state import AgentState
 from app.graph.supervisor import supervisor_node
 from app.graph.nodes import (
@@ -37,16 +38,6 @@ builder.add_edge("Hotels", "HumanReview")
 builder.add_edge("Activities", "HumanReview")
 builder.add_edge("BudgetAnalyst", "HumanReview")
 
-builder.add_conditional_edges(
-    "HumanReview",
-    lambda x: "Supervisor" if x.get("approved") else x.get("last_agent"),
-    {
-        "Supervisor": "Supervisor",
-        "Flights": "Flights",
-        "Hotels": "Hotels",
-        "Activities": "Activities",
-        "BudgetAnalyst": "BudgetAnalyst",
-    }
-)
+checkpointer = MemorySaver()
 
-graph_app = builder.compile()
+graph_app = builder.compile(checkpointer=checkpointer)

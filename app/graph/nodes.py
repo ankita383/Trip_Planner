@@ -1,4 +1,5 @@
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langgraph.types import interrupt, Command
 from app.config.settings import llm_worker
 from app.agents.flight_agent import flight_agent
 from app.agents.hotel_agent import hotel_agent
@@ -16,11 +17,17 @@ Extract structured flight options from the provided text.
 Rules:
 - Return only flights that include a price.
 - Convert prices to numeric INR values.
+- If the price is not available or unknown, set it to null.
 - If no valid flights are present, return an empty list.
 """),
         HumanMessage(content=raw_content)
     ])
-    return [flight.model_dump() for flight in parsed.flights]
+    # Filter out any flights where price is null
+    return [
+        flight.model_dump()
+        for flight in parsed.flights
+        if flight.price is not None
+    ]
 
 
 def _parse_hotels(raw_content):
@@ -32,11 +39,17 @@ Extract structured hotel options from the provided text.
 Rules:
 - Return only hotels that include a per-night price.
 - Convert prices to numeric INR values.
+- If the price is not available or unknown, set it to null.
 - If no valid hotels are present, return an empty list.
 """),
         HumanMessage(content=raw_content)
     ])
-    return [hotel.model_dump() for hotel in parsed.hotels]
+    # Filter out any hotels where price_per_night is null
+    return [
+        hotel.model_dump()
+        for hotel in parsed.hotels
+        if hotel.price_per_night is not None
+    ]
 
 
 def _format_flights(flights):
@@ -59,6 +72,14 @@ def _format_hotels(hotels):
     return "\n".join(lines)
 
 
+def _format_preferences(preferences):
+    """Format accumulated preferences as context for agents."""
+    if not preferences:
+        return ""
+    lines = "\n".join(f"- {p}" for p in preferences)
+    return f"\n\nUser preferences from earlier decisions:\n{lines}"
+
+
 def call_flights(state):
     origin = state["origin"]
     destination = state["destination"]
@@ -67,12 +88,10 @@ def call_flights(state):
     if state.get("feedback"):
         query += f"\nUser feedback: {state['feedback']}"
 
+    query += _format_preferences(state.get("preferences"))
+
     response = flight_agent.invoke({
-        "messages": [
-            HumanMessage(
-                content=query
-            )
-        ]
+        "messages": [HumanMessage(content=query)]
     })
     raw_content = response["messages"][-1].content
     flight_prices = _parse_flights(raw_content)
@@ -97,12 +116,10 @@ def call_hotels(state):
     if state.get("feedback"):
         query += f"\nUser feedback: {state['feedback']}"
 
+    query += _format_preferences(state.get("preferences"))
+
     response = hotel_agent.invoke({
-        "messages": [
-            HumanMessage(
-                content=query
-            )
-        ]
+        "messages": [HumanMessage(content=query)]
     })
     raw_content = response["messages"][-1].content
     hotel_prices = _parse_hotels(raw_content)
@@ -127,12 +144,10 @@ def call_activities(state):
     if state.get("feedback"):
         query += f"\nUser feedback: {state['feedback']}"
 
+    query += _format_preferences(state.get("preferences"))
+
     response = activity_agent.invoke({
-        "messages": [
-            HumanMessage(
-                content=query
-            )
-        ]
+        "messages": [HumanMessage(content=query)]
     })
     content = response["messages"][-1].content
     return {
@@ -188,8 +203,8 @@ def call_budget(state):
             "feedback": None
         }
 
-    flight_avg = sum(flight_values) / len(flight_values) if flight_values else 0.0
-    hotel_avg = sum(hotel_values) / len(hotel_values) if hotel_values else 0.0
+    flight_avg = sum(flight_values) / len(flight_values)
+    hotel_avg = sum(hotel_values) / len(hotel_values)
     hotel_total = hotel_avg * nights
 
     budget_result = calculate_budget_manual.invoke({
@@ -219,48 +234,54 @@ def call_budget(state):
         "feedback": None
     }
 
+
 def human_review(state):
+    """
+    Suspends mid-execution using interrupt().
+    Sends the last agent's output to the client for review.
+    Resumes when /resume calls Command(resume={...}) with the human decision.
 
+    On approval: optionally accepts a preference note (e.g. "I will take IndiGo flight")
+                 which is appended to the cumulative preferences list in state.
+    On rejection: accepts feedback to re-run the same agent with corrections.
+    """
+    last_agent = state.get("last_agent", "Flights")
     last_message = state["messages"][-1]
-    agent_name = last_message.name if hasattr(last_message, 'name') else None
 
-    if agent_name == "FlightAgent":
-        agent = "Flights"
-    elif agent_name == "HotelAgent":
-        agent = "Hotels"
-    elif agent_name == "ActivityAgent":
-        agent = "Activities"
-    elif agent_name == "BudgetAnalyst":
-        agent = "BudgetAnalyst"
-    else:
-        agent = "Flights"
+    decision = interrupt({
+        "agent": last_agent,
+        "message": last_message.content,
+        "instructions": (
+            "Approve or reject. "
+            "If approving, you may add an optional preference note (e.g. 'I will take IndiGo flight'). "
+            "If rejecting, provide feedback for the agent to try again."
+        )
+    })
 
-    print("\n---------------------------")
-    print(f"HUMAN REVIEW AFTER {agent}")
-    print("---------------------------\n")
+    approved = decision.get("approved", False)
+    feedback = decision.get("feedback", None)
+    preference = decision.get("preference", None)
 
-    info = state["messages"][-1].content
-    print(info)
+    existing_preferences = state.get("preferences") or []
+    updated_preferences = existing_preferences + [preference] if preference else existing_preferences
 
-    decision = input("\nApprove this result? (yes/no): ").strip().lower()
+    if approved:
+        return Command(
+            goto="Supervisor",
+            update={
+                "approved": True,
+                "feedback": None,
+                "last_agent": last_agent,
+                "preferences": updated_preferences
+            }
+        )
 
-    if decision == "yes":
-
-        print(f"{agent} approved.\n")
-
-        return {
-            "approved": True,
-            "feedback": None,
-            "last_agent": agent,
-            "next_node": "Supervisor"
+    return Command(
+        goto=last_agent,
+        update={
+            "approved": False,
+            "feedback": feedback,
+            "last_agent": last_agent,
+            "preferences": updated_preferences
         }
-
-    feedback = input("Enter feedback: ").strip()
-    print(f"{agent} will run again with your feedback...\n")
-
-    return {
-        "approved": False,
-        "feedback": feedback,
-        "last_agent": agent,
-        "next_node": agent
-    }
+    )

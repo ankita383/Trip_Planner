@@ -22,3 +22,4 @@ class AgentState(TypedDict):
     last_agent: str
     approved: bool
     feedback: Optional[str]
+    preferences: list[str]
