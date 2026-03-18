@@ -15,14 +15,15 @@ def _parse_flights(raw_content):
 Extract structured flight options from the provided text.
 
 Rules:
-- Return only flights that include a price.
+- Return a MAXIMUM of 5 flights. Do not return more than 5 under any circumstance.
+- Only include flights that have a real price from the text.
 - Convert prices to numeric INR values.
 - If the price is not available or unknown, set it to null.
 - If no valid flights are present, return an empty list.
+- Do NOT invent or fabricate flight options. Only use what is in the text.
 """),
         HumanMessage(content=raw_content)
     ])
-    # Filter out any flights where price is null
     return [
         flight.model_dump()
         for flight in parsed.flights
@@ -37,14 +38,15 @@ def _parse_hotels(raw_content):
 Extract structured hotel options from the provided text.
 
 Rules:
-- Return only hotels that include a per-night price.
+- Return a MAXIMUM of 5 hotels. Do not return more than 5 under any circumstance.
+- Only include hotels that have a real per-night price from the text.
 - Convert prices to numeric INR values.
 - If the price is not available or unknown, set it to null.
 - If no valid hotels are present, return an empty list.
+- Do NOT invent or fabricate hotel options. Only use what is in the text.
 """),
         HumanMessage(content=raw_content)
     ])
-    # Filter out any hotels where price_per_night is null
     return [
         hotel.model_dump()
         for hotel in parsed.hotels
@@ -163,69 +165,114 @@ def call_activities(state):
     }
 
 
+def _extract_price_from_preference(pref):
+    """Extract first INR numeric value from a preference string."""
+    import re
+    if not pref:
+        return None
+    match = re.search(r'(?:INR|Rs[.]?|[₹])?\s*(\d[\d,]*(?:[.]\d+)?)\s*(?:INR|Rs[.]?|[₹]|/night)?', pref, re.IGNORECASE)
+    if match:
+        return float(match.group(1).replace(',', ''))
+    return None
+
+
+def _get_flight_preference_price(preferences):
+    """
+    Return price from the FIRST preference (always the flight approval note).
+    Skips 'string' placeholder or entries with no extractable price.
+    """
+    import re
+    if not preferences:
+        return None
+    pref = preferences[0]
+    if pref.strip().lower() == 'string':
+        return None
+    return _extract_price_from_preference(pref)
+
+
+def _get_hotel_preference_price(preferences):
+    """
+    Return price from the SECOND preference (always the hotel approval note).
+    Skips 'string' placeholder or entries with no extractable price.
+    """
+    if not preferences or len(preferences) < 2:
+        return None
+    pref = preferences[1]
+    if pref.strip().lower() == 'string':
+        return None
+    return _extract_price_from_preference(pref)
+
+
 def call_budget(state):
     budget_limit = state.get("budget")
     if budget_limit is None:
         budget_limit = 250000
     nights = state.get("nights", 5) or 5
+    preferences = state.get("preferences") or []
 
-    flight_values = [
-        float(flight["price"])
-        for flight in state.get("flight_prices", [])
-        if flight.get("price") is not None
-    ]
-    hotel_values = [
-        float(hotel["price_per_night"])
-        for hotel in state.get("hotel_prices", [])
-        if hotel.get("price_per_night") is not None
-    ]
-
-    if not flight_values or not hotel_values:
-        missing_sources = []
+    chosen_flight = _get_flight_preference_price(preferences)
+    if chosen_flight is not None:
+        flight_cost = chosen_flight
+        flight_source = f"user chosen: INR {flight_cost:.2f}"
+    else:
+        flight_values = [
+            float(f["price"])
+            for f in state.get("flight_prices", [])
+            if f.get("price") is not None
+        ]
         if not flight_values:
-            missing_sources.append("flight prices")
+            content = "Unable to calculate budget: no flight prices available."
+            return {
+                "messages": [AIMessage(content=f"BUDGET ANALYSIS COMPLETE: {content}", name="BudgetAnalyst")],
+                "budget_done": True,
+                "last_agent": "BudgetAnalyst",
+                "feedback": None
+            }
+        flight_cost = sum(flight_values) / len(flight_values)
+        flight_source = f"average of {len(flight_values)} options: INR {flight_cost:.2f}"
+
+    chosen_hotel = _get_hotel_preference_price(preferences)
+    if chosen_hotel is not None:
+        hotel_per_night = chosen_hotel
+        hotel_source = f"user chosen: INR {hotel_per_night:.2f}/night"
+    else:
+        hotel_values = [
+            float(h["price_per_night"])
+            for h in state.get("hotel_prices", [])
+            if h.get("price_per_night") is not None
+        ]
         if not hotel_values:
-            missing_sources.append("hotel prices")
+            content = "Unable to calculate budget: no hotel prices available."
+            return {
+                "messages": [AIMessage(content=f"BUDGET ANALYSIS COMPLETE: {content}", name="BudgetAnalyst")],
+                "budget_done": True,
+                "last_agent": "BudgetAnalyst",
+                "feedback": None
+            }
+        hotel_per_night = sum(hotel_values) / len(hotel_values)
+        hotel_source = f"average of {len(hotel_values)} options: INR {hotel_per_night:.2f}/night"
 
-        content = (
-            "Unable to calculate budget from retrieved values because "
-            f"structured {' and '.join(missing_sources)} were not available."
-        )
-        return {
-            "messages": [
-                AIMessage(
-                    content=f"BUDGET ANALYSIS COMPLETE: {content}",
-                    name="BudgetAnalyst"
-                )
-            ],
-            "budget_done": True,
-            "last_agent": "BudgetAnalyst",
-            "feedback": None
-        }
-
-    flight_avg = sum(flight_values) / len(flight_values)
-    hotel_avg = sum(hotel_values) / len(hotel_values)
-    hotel_total = hotel_avg * nights
+    hotel_total = hotel_per_night * nights
 
     budget_result = calculate_budget_manual.invoke({
-        "flight_cost": round(flight_avg, 2),
+        "flight_cost": round(flight_cost, 2),
         "hotel_cost": round(hotel_total, 2),
         "budget_limit": float(budget_limit)
     })
 
     content = (
-        f"Average flight cost: INR {flight_avg:.2f}\n"
-        f"Average hotel cost per night: INR {hotel_avg:.2f}\n"
+        f"Flight cost ({flight_source})\n"
+        f"Hotel cost ({hotel_source})\n"
         f"Nights: {nights}\n"
         f"Total hotel cost: INR {hotel_total:.2f}\n"
         f"Budget limit: INR {float(budget_limit):.2f}\n"
-        f"Total: INR {budget_result['total']:.2f}\n"
+        f"Total trip cost: INR {budget_result['total']:.2f}\n"
         f"Status: {budget_result['status']}"
     )
     return {
         "messages": [
             AIMessage(
-                content=f"BUDGET ANALYSIS COMPLETE: {content}",
+                content=f"BUDGET ANALYSIS COMPLETE:\n{content}",
                 name="BudgetAnalyst"
             )
         ],
