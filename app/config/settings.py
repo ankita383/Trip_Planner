@@ -6,12 +6,12 @@ from langchain_tavily import TavilySearch
 load_dotenv()
 
 llm_supervisor = ChatGroq(
-    model="llama-3.1-8b-instant",
+    model="openai/gpt-oss-120b",
     temperature=0
 )
 
 llm_worker = ChatGroq(
-    model="llama-3.1-8b-instant",
+    model="openai/gpt-oss-120b",
     temperature=0
 )
 
