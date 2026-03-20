@@ -8,34 +8,30 @@ from app.graph.builder import graph_app
 
 app = FastAPI(title="Multi-Agent Travel Planner")
 
-
 class TripQuery(BaseModel):
     user_query: str
-
 
 class ResumeRequest(BaseModel):
     thread_id: str
     approved: bool
-    feedback: Optional[str] = None    
-    preference: Optional[str] = None  
+    feedback: Optional[str] = None
+    preference: Optional[str] = None
+
+class ClarifyRequest(BaseModel):
+    thread_id: str
+    nights: Optional[int] = None
+    budget: Optional[float] = None
 
 
 def _extract_history(state: dict) -> list[dict]:
     history = []
     for m in state["messages"]:
-        sender = (
-            m.name if hasattr(m, "name") and m.name
-            else "User"
-        )
+        sender = m.name if hasattr(m, "name") and m.name else "User"
         history.append({"agent": sender, "message": m.content})
     return history
 
 
 def _find_interrupt(result: dict) -> dict | None:
-    """
-    LangGraph surfaces interrupt payloads under the '__interrupt__' key
-    in the last chunk when using invoke(). Extract it if present.
-    """
     interrupts = result.get("__interrupt__")
     if interrupts:
         return interrupts[0].value
@@ -54,7 +50,7 @@ async def generate_plan(request: TripQuery):
             "origin": "",
             "destination": "",
             "budget": None,
-            "nights": 5,
+            "nights": None,
             "flights_done": False,
             "hotels_done": False,
             "activities_done": False,
@@ -71,6 +67,14 @@ async def generate_plan(request: TripQuery):
 
     interrupt_payload = _find_interrupt(result)
     if interrupt_payload:
+        if "question" in interrupt_payload:
+            return {
+                "status": "clarification_needed",
+                "thread_id": thread_id,
+                "question": interrupt_payload["question"],
+                "missing_fields": interrupt_payload.get("missing_fields", []),
+                "message": "Call POST /clarify with the missing details to continue."
+            }
         return {
             "status": "awaiting_review",
             "thread_id": thread_id,
@@ -81,6 +85,39 @@ async def generate_plan(request: TripQuery):
     return {
         "status": "complete",
         "thread_id": thread_id,
+        "plan": _extract_history(result)
+    }
+
+
+@app.post("/clarify")
+async def clarify(request: ClarifyRequest):
+    """Provide missing nights/budget to resume planning after clarification_needed."""
+    config = {"configurable": {"thread_id": request.thread_id}}
+
+    snapshot = graph_app.get_state(config)
+    if not snapshot or not snapshot.next:
+        raise HTTPException(status_code=404, detail="Thread not found or already completed.")
+
+    answer = {}
+    if request.nights is not None:
+        answer["nights"] = request.nights
+    if request.budget is not None:
+        answer["budget"] = request.budget
+
+    result = graph_app.invoke(Command(resume=answer), config=config)
+
+    interrupt_payload = _find_interrupt(result)
+    if interrupt_payload:
+        return {
+            "status": "awaiting_review",
+            "thread_id": request.thread_id,
+            "pending_review": interrupt_payload,
+            "message": "Agent output is ready for your review. Call POST /resume to approve or reject."
+        }
+
+    return {
+        "status": "complete",
+        "thread_id": request.thread_id,
         "plan": _extract_history(result)
     }
 

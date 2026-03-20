@@ -1,11 +1,11 @@
 from langchain_core.messages import SystemMessage, HumanMessage
+from langgraph.types import interrupt
 from app.config.settings import llm_supervisor, llm_worker
 from app.schemas.trip_schema import TripInfo
 from app.schemas.router_schema import SupervisorRouter
 
 
 AGENT_ORDER = ["Flights", "Hotels", "Activities", "BudgetAnalyst"]
-
 
 def _is_done(state, agent_name):
     done_flags = {
@@ -15,7 +15,6 @@ def _is_done(state, agent_name):
         "BudgetAnalyst": state["budget_done"],
     }
     return done_flags.get(agent_name, False)
-
 
 def _next_unfinished_agent(state, start_from=None):
     start_index = 0
@@ -27,7 +26,6 @@ def _next_unfinished_agent(state, start_from=None):
             return agent_name
 
     return "FINISH"
-
 
 def supervisor_node(state):
     user_query = state["messages"][0].content
@@ -64,7 +62,39 @@ Night rules:
         state["origin"] = trip.origin
         state["destination"] = trip.destination
         state["budget"] = trip.budget
-        state["nights"] = trip.nights if trip.nights is not None else state.get("nights", 5)
+        state["nights"] = trip.nights
+
+    nothing_done = not any([
+        state.get("flights_done"),
+        state.get("hotels_done"),
+        state.get("activities_done"),
+        state.get("budget_done"),
+    ])
+
+    if nothing_done:
+        missing = []
+        if state.get("nights") is None:
+            missing.append("nights")
+        if state.get("budget") is None:
+            missing.append("budget")
+
+        if missing:
+            questions = []
+            if "nights" in missing:
+                questions.append("How many nights are you planning to stay?")
+            if "budget" in missing:
+                questions.append("What is your total budget for this trip (in INR)?")
+
+            answer = interrupt({
+                "question": " and ".join(questions),
+                "missing_fields": missing
+            })
+
+            if "nights" in answer:
+                state["nights"] = int(answer["nights"])
+            if "budget" in answer:
+                state["budget"] = float(answer["budget"])
+
     prompt = f"""
 You are a travel supervisor responsible for coordinating multiple travel planning agents.
 
@@ -118,5 +148,5 @@ Rules:
         "origin": state["origin"],
         "destination": state["destination"],
         "budget": state.get("budget"),
-        "nights": state.get("nights", 5)
+        "nights": state.get("nights")
     }
